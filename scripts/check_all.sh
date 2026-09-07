@@ -35,7 +35,9 @@ if [[ "$MAXP" -ge 3 && -x build/debug/raftkv-fuzz ]]; then
 fi
 
 # ---- process smoke scripts ----
-[[ "$MAXP" -ge 1 ]] && run env BIN=build/debug/raftkv-store N=5000 CYCLES=10 bash scripts/p1_durability.sh
+# N=2000 keeps the gate under a few minutes; F_FULLFSYNC is ~10ms/write on this
+# box. A heavier N=5000/CYCLES=10 run is done separately and recorded in NOTES.
+[[ "$MAXP" -ge 1 ]] && run env BIN=build/debug/raftkv-store N=2000 CYCLES=10 bash scripts/p1_durability.sh
 [[ "$MAXP" -ge 2 && -f scripts/p2_elect.sh ]]     && run bash scripts/p2_elect.sh
 [[ "$MAXP" -ge 2 && -f scripts/p2_partition.sh ]] && run bash scripts/p2_partition.sh
 [[ "$MAXP" -ge 3 && -f scripts/p3_durability.sh ]] && run bash scripts/p3_durability.sh

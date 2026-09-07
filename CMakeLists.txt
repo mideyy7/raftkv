@@ -21,6 +21,7 @@ enable_testing()
 set(RAFTKV_SOURCES
   src/common/crc32c.cpp
   src/common/config.cpp
+  src/common/wire.cpp
   src/storage/wal.cpp
   src/storage/log_store.cpp
   src/storage/kv_table.cpp
@@ -86,6 +87,7 @@ raftkv_add_tool(raftkv-store        src/server/store_main.cpp)
 # ---- phase 2 ----
 raftkv_add_test(t_raft_election     tests/unit/raft_election_test.cpp   phase2)
 raftkv_add_test(t_election_integ    tests/integration/election_test.cpp phase2)
+raftkv_add_test(t_node_cluster      tests/integration/node_cluster_test.cpp phase2)
 raftkv_add_tool(raftkv-node         src/server/node_main.cpp)
 
 # ---- phase 3 ----
