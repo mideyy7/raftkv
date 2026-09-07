@@ -5,9 +5,8 @@ consensus algorithm. A cluster of 3–5 nodes behaves as one linearizable KV sto
 and keeps serving as long as a majority is alive, even when individual nodes
 crash, restart, or lose network connectivity.
 
-Written in C++20. Networking is raw TCP with a hand-rolled length-prefixed
-binary protocol — no gRPC, no protobuf, no third-party libraries. Building
-needs only a C++20 compiler and CMake.
+Written in C++20. Networking is TCP with a hand-rolled length-prefixed
+binary protocol
 
 ## What it does
 
@@ -27,11 +26,6 @@ needs only a C++20 compiler and CMake.
   a round-tagged heartbeat before serving, so a partitioned ex-leader cannot
   return stale data.
 
-### Non-goals
-
-Log compaction / snapshotting, live membership changes, pipelined replication,
-and a log-structured storage engine are out of scope. This is a correctness- and
-clarity-focused implementation, not a production datastore.
 
 ## Architecture
 
@@ -149,7 +143,3 @@ tests/        unit/ integration/ fuzz/ lin/ + harnesses
 scripts/      run_cluster.sh, p1..p4 gates, check_all.sh
 docs/         BENCHMARKS.md, RESULTS/
 ```
-
-## License
-
-MIT
