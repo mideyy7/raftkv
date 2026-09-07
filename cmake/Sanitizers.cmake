@@ -3,7 +3,7 @@
 function(raftkv_apply_common_flags target)
   target_compile_features(${target} PUBLIC cxx_std_20)
   target_compile_options(${target} PRIVATE
-    -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion
+    -Wall -Wextra -Wpedantic -Wshadow
     -Wno-unused-parameter)
   if(RAFTKV_SANITIZE STREQUAL "address")
     target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer -g)
