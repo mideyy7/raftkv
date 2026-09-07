@@ -75,6 +75,7 @@ class RaftNode {
   std::condition_variable applied_cv_;  // client waiters
   std::deque<Message> mailbox_;
   bool running_ = false;
+  bool pending_work_ = false;  // a client proposal/read is waiting for the loop
   std::thread raft_thread_;
 
   uint64_t applied_index_ = 0;

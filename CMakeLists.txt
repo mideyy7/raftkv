@@ -107,3 +107,8 @@ raftkv_add_tool(raftkv-cli          src/client/cli_main.cpp)
 
 # ---- phase 5 ----
 raftkv_add_tool(raftkv-loadgen      bench/loadgen.cpp)
+find_program(PYTHON3 python3)
+if(PYTHON3 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/bench/test_report.py")
+  add_test(NAME t_bench_report COMMAND ${PYTHON3} ${CMAKE_CURRENT_SOURCE_DIR}/bench/test_report.py)
+  set_tests_properties(t_bench_report PROPERTIES LABELS "phase5" TIMEOUT 120)
+endif()

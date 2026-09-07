@@ -15,6 +15,7 @@ data-*/
 *.wal
 *.snap
 scratch/
+docs/RESULTS/*.csv
 docs/RESULTS/*.raw
 *.log
 

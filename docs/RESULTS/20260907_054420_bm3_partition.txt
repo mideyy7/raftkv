@@ -1,0 +1,5 @@
+run 20260907_054420  commit 72361f8  Darwin 24.6.0 arm64 / 8 cpu  nodes=5  election=300ms hb=75ms tick=25ms
+
+baseline throughput (5 nodes healthy) : 543.6 ops/s
+majority throughput (2/5 partitioned) : 565.5 ops/s
+minority write probe reply            : 'RETRY'  (must NOT be OK)

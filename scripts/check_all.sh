@@ -42,7 +42,8 @@ fi
 [[ "$MAXP" -ge 2 && -f scripts/p2_partition.sh ]] && run bash scripts/p2_partition.sh
 [[ "$MAXP" -ge 3 && -f scripts/p3_durability.sh ]] && run env COUNT=300 KILLS=4 CYCLES=2 bash scripts/p3_durability.sh
 [[ "$MAXP" -ge 3 && -f scripts/p3_durability.sh ]] && run env ALWAYS_LEADER=1 COUNT=250 KILLS=5 CYCLES=2 bash scripts/p3_durability.sh
-[[ "$MAXP" -ge 4 && -f scripts/p4_client.sh ]]    && run bash scripts/p4_client.sh
+[[ "$MAXP" -ge 4 && -f scripts/p4_client.sh ]]    && run env COUNT=150 bash scripts/p4_client.sh
+[[ "$MAXP" -ge 5 && -f bench/test_report.py ]]    && run python3 bench/test_report.py
 
 echo
 [[ "$rc" -eq 0 ]] && echo "ALL CHECKS PASSED (phases 1..$MAXP)" || echo "SOME CHECKS FAILED"

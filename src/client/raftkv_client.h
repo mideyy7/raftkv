@@ -32,6 +32,9 @@ struct ClientOptions {
 class RaftKvClient {
  public:
   RaftKvClient(std::vector<ClientEndpoint> endpoints, ClientOptions opts = {});
+  ~RaftKvClient();
+  RaftKvClient(const RaftKvClient&) = delete;
+  RaftKvClient& operator=(const RaftKvClient&) = delete;
 
   struct Reply {
     bool ok = false;
@@ -62,7 +65,11 @@ class RaftKvClient {
   uint64_t client_id_ = 0;
   uint64_t seq_ = 0;
   int leader_idx_ = 0;
+  int leader_fd_ = -1;   // cached persistent connection to eps_[leader_idx_]
+  int cached_idx_ = -1;  // which endpoint leader_fd_ points at
   std::mt19937_64 rng_;
+
+  void drop_conn();
 };
 
 }  // namespace raftkv

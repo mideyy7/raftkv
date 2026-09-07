@@ -1,0 +1,6 @@
+cycle 1: OK  (200 acked, all present after 10 kill/restarts)
+cycle 2: OK  (200 acked, all present after 10 kill/restarts)
+cycle 3: OK  (200 acked, all present after 10 kill/restarts)
+cycle 4: OK  (200 acked, all present after 10 kill/restarts)
+cycle 5: OK  (200 acked, all present after 10 kill/restarts)
+PASS: zero committed write loss

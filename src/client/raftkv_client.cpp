@@ -31,6 +31,14 @@ RaftKvClient::RaftKvClient(std::vector<ClientEndpoint> endpoints,
   client_id_ = rng_() | 1;  // never 0 (0 == "no session" on the server)
 }
 
+RaftKvClient::~RaftKvClient() { drop_conn(); }
+
+void RaftKvClient::drop_conn() {
+  if (leader_fd_ >= 0) ::close(leader_fd_);
+  leader_fd_ = -1;
+  cached_idx_ = -1;
+}
+
 int RaftKvClient::endpoint_index_for_id(uint64_t id) const {
   for (size_t i = 0; i < eps_.size(); ++i)
     if (eps_[i].id == id) return static_cast<int>(i);
@@ -113,12 +121,16 @@ RaftKvClient::Reply RaftKvClient::do_request(const std::string& line,
 
   while (now_ms() < deadline) {
     if (eps_.empty()) return {false, false, "", "no endpoints"};
-    ClientEndpoint& ep = eps_[static_cast<size_t>(leader_idx_ % eps_.size())];
-    int fd = connect_to(ep);
+    int want = leader_idx_ % static_cast<int>(eps_.size());
+    if (leader_fd_ >= 0 && cached_idx_ != want) drop_conn();
+    if (leader_fd_ < 0) {
+      leader_fd_ = connect_to(eps_[static_cast<size_t>(want)]);
+      cached_idx_ = (leader_fd_ >= 0) ? want : -1;
+    }
+    int fd = leader_fd_;
     if (fd >= 0) {
       std::string resp;
       if (send_line(fd, line) && recv_line(fd, resp)) {
-        ::close(fd);
         if (resp.rfind("OK", 0) == 0) {
           Reply r;
           r.ok = true;
@@ -134,12 +146,14 @@ RaftKvClient::Reply RaftKvClient::do_request(const std::string& line,
             return {false, false, "", "too many redirects"};
           uint64_t hint = std::strtoull(resp.c_str() + 9, nullptr, 10);
           int idx = endpoint_index_for_id(hint);
+          drop_conn();
           if (idx >= 0) { leader_idx_ = idx; continue; }  // no backoff on redirect
           // unknown hint -> fall through to rotate + backoff
+        } else {
+          drop_conn();  // RETRY / ERR -> reconnect (maybe elsewhere) after backoff
         }
-        // RETRY or ERR -> fall through to backoff
       } else {
-        ::close(fd);
+        drop_conn();
       }
     }
     // rotate to the next endpoint and back off

@@ -34,6 +34,14 @@ start_cluster() {  # start_cluster N [extra node args...]
   local peers; peers=$(peers_spec "$n")
   NODE_PIDS=()
   local i rp
+  # free any process squatting on the ports we are about to use (stray node
+  # from a previous run that outlived its script)
+  local squat
+  for i in $(seq 1 "$n"); do
+    squat=$(lsof -ti tcp:"$(raft_port "$i")" -sTCP:LISTEN 2>/dev/null; lsof -ti tcp:"$(client_port "$i")" -sTCP:LISTEN 2>/dev/null)
+    [[ -n "$squat" ]] && kill -9 $squat 2>/dev/null
+  done
+  sleep 0.2
   for i in $(seq 1 "$n"); do
     rp=$(raft_port "$i")
     mkdir -p "$WORKDIR/n$i"

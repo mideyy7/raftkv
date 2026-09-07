@@ -85,10 +85,15 @@ void RaftNode::raft_loop() {
 
   std::unique_lock<std::mutex> lk(mu_);
   while (running_) {
-    wake_.wait_until(lk, last_tick + tick_period,
-                     [&] { return !running_ || !mailbox_.empty(); });
+    wake_.wait_until(lk, last_tick + tick_period, [&] {
+      return !running_ || !mailbox_.empty() || pending_work_;
+    });
     if (!running_) break;
+    pending_work_ = false;
 
+    // Drain every queued message in one pass so concurrent client proposals
+    // and follower acks batch into a single Ready -> one fsync, one
+    // AppendEntries round.
     while (!mailbox_.empty()) {
       Message m = std::move(mailbox_.front());
       mailbox_.pop_front();
@@ -121,7 +126,14 @@ void RaftNode::process_ready_locked(std::unique_lock<std::mutex>& lk) {
       if (Status s = log_->append_batch(rd.entries); !s)
         LOG_ERROR("node", "append_batch: %s", s.message().c_str());
     }
-    if (rd.hard_state || !rd.entries.empty()) log_->sync();
+    if (rd.hard_state || !rd.entries.empty()) {
+      // fsync is the slow part (~ms). Only the raft thread ever writes log_, so
+      // it is safe to drop mu_ here -- client threads can queue more proposals
+      // into the core meanwhile, which batch into the next Ready.
+      lk.unlock();
+      log_->sync();
+      lk.lock();
+    }
 
     for (const auto& m : rd.messages) transport_->send(m.to, m);
 
@@ -209,7 +221,10 @@ RaftNode::ClientResult RaftNode::client_write(uint64_t client_id, uint64_t seq,
   }
   uint64_t idx = core_->last_log_index();
   uint64_t want_term = core_->term();
-  process_ready_locked(lk);
+  // Hand off to the raft thread instead of persisting inline: concurrent
+  // client_write calls then coalesce into one fsync + one replication round.
+  pending_work_ = true;
+  wake_.notify_one();
 
   bool ok = applied_cv_.wait_for(lk, std::chrono::seconds(3), [&] {
     return !running_ || applied_index_ >= idx || core_->term() != want_term;
@@ -240,7 +255,8 @@ RaftNode::ClientResult RaftNode::client_read(const std::string& key) {
   }
   uint64_t ctx = next_read_ctx_++;
   core_->request_read(ctx);
-  process_ready_locked(lk);
+  pending_work_ = true;
+  wake_.notify_one();
 
   bool ok = applied_cv_.wait_for(lk, std::chrono::seconds(3), [&] {
     return !running_ || read_results_.count(ctx) > 0;
