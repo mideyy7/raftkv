@@ -148,35 +148,5 @@ path closely.
 
 ---
 
-## CV bullet points
-
-Lead with the first two.
-
-- Built a **5-node Raft consensus cluster in C++20** (leader election, log
-  replication, PreVote, ReadIndex) sustaining **1,900 writes/sec at 200
-  concurrent clients with P99 write latency of 162 ms** (P50 103 ms), using
-  majority-commit replication with per-round proposal batching and randomised
-  election timeouts to prevent split-vote failures.
-
-- Measured cluster recovery at **520 ms median (P95 577 ms, worst 601 ms) across
-  25 induced `kill -9` leader failures** under continuous load, with **zero
-  committed-write loss across 50 kill-and-recover cycles**, by enforcing
-  log-completeness checks during elections and `fsync`-before-ack on term, vote
-  and log state.
-
-- Sustained **unaffected majority throughput (566 vs 544 ops/sec baseline)
-  during a simulated 2-of-5 network partition** while the isolated minority
-  correctly refused writes instead of serving stale reads, by requiring quorum
-  acknowledgement before commit and a leadership-confirming heartbeat round
-  before every read.
-
-- Validated safety with a **randomized fault-injection model checker — 1,000
-  schedules (500 seeds × 2 cluster sizes × 2,000 steps)** of crashes, restarts,
-  partitions and message reordering — asserting election safety, log matching,
-  state-machine safety, commit durability and linearizability against a
-  reference model on every step; **0 violations** (the fuzzer caught two real
-  bugs: an off-by-one in the follower commit-index rule and a stale-read window
-  in ReadIndex).
-
 All numbers reproduce via `bench/run_all.sh`; results and per-run headers
 (seed + commit + machine) are under `docs/RESULTS/`.
