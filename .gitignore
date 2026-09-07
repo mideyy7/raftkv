@@ -1,0 +1,24 @@
+# study docs — intentionally not committed (see user instruction)
+docs/IMPLEMENTATION_PLAN.md
+docs/NOTES.md
+
+# build
+build/
+build-*/
+*.o
+*.a
+compile_commands.json
+
+# runtime data / benchmark scratch
+data/
+data-*/
+*.wal
+*.snap
+scratch/
+docs/RESULTS/*.raw
+*.log
+
+# editor / os
+.DS_Store
+.cache/
+.vscode/
