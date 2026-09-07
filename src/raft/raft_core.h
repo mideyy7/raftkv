@@ -42,6 +42,12 @@ class RaftCore {
   uint64_t last_log_index() const;
   uint64_t last_log_term() const;
   size_t log_size() const { return log_.size(); }
+  // full log, index 1..N (for invariant checkers and tests)
+  const std::vector<LogEntry>& log_view() const { return log_; }
+  uint64_t match_index_of(NodeId peer) const {
+    return match_index_[peer_slot(peer)];
+  }
+  uint64_t term_at(uint64_t index) const;  // 0 if out of range
   // election timeout currently in effect (ticks); for test assertions
   uint32_t effective_election_timeout() const { return election_timeout_; }
 
@@ -52,6 +58,8 @@ class RaftCore {
   void become_leader();
 
   // message handlers
+  void handle_pre_vote(const Message& m);
+  void handle_pre_vote_resp(const Message& m);
   void handle_request_vote(const Message& m);
   void handle_request_vote_resp(const Message& m);
   void handle_append_entries(const Message& m);
@@ -62,12 +70,13 @@ class RaftCore {
   // helpers
   void reset_election_timer();
   void fail_pending_reads();
+  void start_prevote();
   void send(Message m);
+  void broadcast_vote_request(MsgType type, uint64_t term);
   void broadcast_request_vote();
   void broadcast_append_entries(bool heartbeat);
   void send_append_to(NodeId peer, bool heartbeat);
   bool log_is_up_to_date(uint64_t cand_last_index, uint64_t cand_last_term) const;
-  uint64_t term_at(uint64_t index) const;   // 0 if out of range
   void maybe_advance_commit();               // leader: majority matchIndex rule
   void mark_hard_dirty() { hard_dirty_ = true; }
   const std::vector<NodeId>& peers() const { return cfg_.peers; }
@@ -78,6 +87,8 @@ class RaftCore {
   std::vector<LogEntry> log_;      // index 1..N == log_[0..N-1]
 
   Role role_ = Role::kFollower;
+  enum class Campaign { kNone, kPre, kReal };
+  Campaign campaign_ = Campaign::kNone;
   NodeId leader_ = 0;
   uint64_t last_applied_ = 0;
 

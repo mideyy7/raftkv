@@ -31,7 +31,7 @@ done
 
 # ---- fuzz (Phase 3+) ----
 if [[ "$MAXP" -ge 3 && -x build/debug/raftkv-fuzz ]]; then
-  run build/debug/raftkv-fuzz --seeds=500 --steps=2000
+  run build/debug/raftkv-fuzz --seeds="${FUZZ_SEEDS:-500}" --steps="${FUZZ_STEPS:-2000}"
 fi
 
 # ---- process smoke scripts ----
@@ -40,7 +40,8 @@ fi
 [[ "$MAXP" -ge 1 ]] && run env BIN=build/debug/raftkv-store N=2000 CYCLES=10 bash scripts/p1_durability.sh
 [[ "$MAXP" -ge 2 && -f scripts/p2_elect.sh ]]     && run bash scripts/p2_elect.sh
 [[ "$MAXP" -ge 2 && -f scripts/p2_partition.sh ]] && run bash scripts/p2_partition.sh
-[[ "$MAXP" -ge 3 && -f scripts/p3_durability.sh ]] && run bash scripts/p3_durability.sh
+[[ "$MAXP" -ge 3 && -f scripts/p3_durability.sh ]] && run env COUNT=300 KILLS=4 CYCLES=2 bash scripts/p3_durability.sh
+[[ "$MAXP" -ge 3 && -f scripts/p3_durability.sh ]] && run env ALWAYS_LEADER=1 COUNT=250 KILLS=5 CYCLES=2 bash scripts/p3_durability.sh
 [[ "$MAXP" -ge 4 && -f scripts/p4_client.sh ]]    && run bash scripts/p4_client.sh
 
 echo

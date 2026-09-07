@@ -52,6 +52,48 @@ stop_cluster() {
   [[ -n "${WORKDIR:-}" ]] && rm -rf "$WORKDIR"
 }
 
+# PUT via the current leader, following REDIRECT and retrying RETRY.
+# put_kv N key value [cid seq]  -> echoes "OK ..." on success, "" on give-up
+put_kv() {
+  local n="$1" key="$2" val="$3" cid="${4:-0}" seq="${5:-0}"
+  local try leader resp
+  leader=$(find_leader "$n")
+  for try in $(seq 1 40); do
+    [[ -z "$leader" ]] && leader=$(find_leader "$n")
+    if [[ -n "$leader" ]]; then
+      resp=$(ask "$leader" "PUT $key $val $cid $seq")
+      case "$resp" in
+        OK*) echo "$resp"; return 0 ;;
+        REDIRECT*) leader=$(echo "$resp" | awk '{print $2}') ;;
+        *) leader="" ;;
+      esac
+    fi
+    sleep 0.1
+  done
+  echo ""
+  return 1
+}
+
+# GET via the current leader, following REDIRECT / retrying RETRY.
+get_kv() {
+  local n="$1" key="$2" try leader resp
+  leader=$(find_leader "$n")
+  for try in $(seq 1 40); do
+    [[ -z "$leader" ]] && leader=$(find_leader "$n")
+    if [[ -n "$leader" ]]; then
+      resp=$(ask "$leader" "GET $key")
+      case "$resp" in
+        VALUE*|NIL) echo "$resp"; return 0 ;;
+        REDIRECT*) leader=$(echo "$resp" | awk '{print $2}') ;;
+        *) leader="" ;;
+      esac
+    fi
+    sleep 0.1
+  done
+  echo ""
+  return 1
+}
+
 # find the current leader id among nodes 1..N (empty if none / split)
 find_leader() {  # find_leader N
   local n="$1" i s role term

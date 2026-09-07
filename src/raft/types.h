@@ -23,6 +23,8 @@ enum class MsgType : uint8_t {
   kAppendEntriesResp = 4,
   kReadIndex = 5,       // phase 4: client-read leadership probe (piggybacked)
   kReadIndexResp = 6,
+  kPreVote = 7,         // PreVote: hypothetical election, no term bump
+  kPreVoteResp = 8,
 };
 
 const char* msg_name(MsgType t);

@@ -20,6 +20,15 @@ class Solo {
     build();
   }
 
+  // Preload durable state (log + HardState) then (re)build the core -- for
+  // white-box tests that need a node to start with a specific log, e.g. a
+  // prior-term entry for the Figure-8 commit-safety scenario.
+  void preload(std::vector<LogEntry> log, HardState hs) {
+    for (auto& e : log) disk_.apply_ready_entries({e});
+    disk_.set_hard(hs);
+    build();
+  }
+
   RaftCore& core() { return *core_; }
   MemLog& disk() { return disk_; }
 

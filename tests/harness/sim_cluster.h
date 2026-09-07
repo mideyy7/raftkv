@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "raft/invariants.h"
 #include "raft/raft_core.h"
 #include "storage/kv_table.h"
 
@@ -191,6 +192,29 @@ class SimCluster {
       }
     }
     return leaders_at_best == 1 ? lead : 0;
+  }
+
+  std::vector<invariants::NodeView> views() const {
+    std::vector<invariants::NodeView> vs;
+    for (NodeId id : ids_) {
+      const auto& n = *nodes_.at(id);
+      invariants::NodeView v;
+      v.id = id;
+      v.alive = n.alive && n.core != nullptr;
+      if (v.alive) {
+        v.role = n.core->role();
+        v.term = n.core->term();
+        v.commit_index = n.core->commit_index();
+        v.log = n.core->log_view();
+      }
+      v.applied = n.applied;
+      vs.push_back(std::move(v));
+    }
+    return vs;
+  }
+
+  std::string check_invariants() const {
+    return invariants::check_all(views());
   }
 
   int leader_count_for_term(uint64_t term) const {

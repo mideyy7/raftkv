@@ -24,6 +24,8 @@ const char* msg_name(MsgType t) {
     case MsgType::kAppendEntriesResp: return "AppendEntriesResp";
     case MsgType::kReadIndex: return "ReadIndex";
     case MsgType::kReadIndexResp: return "ReadIndexResp";
+    case MsgType::kPreVote: return "PreVote";
+    case MsgType::kPreVoteResp: return "PreVoteResp";
   }
   return "?";
 }
@@ -40,7 +42,9 @@ RaftCore::RaftCore(RaftConfig cfg, PersistentState init)
   votes_responded_.assign(n, false);
   next_index_.assign(n, last_log_index() + 1);
   match_index_.assign(n, 0);
-  last_applied_ = 0;  // state machine is rebuilt by replaying committed entries
+  // The driver is responsible for replaying [first, commit_index] into the state
+  // machine at startup, so the core must not re-emit those as committed.
+  last_applied_ = hard_.commit_index;
   stable_index_ = last_log_index();  // everything from disk is already stable
   reset_election_timer();
   become_follower(hard_.current_term, 0);
@@ -100,14 +104,37 @@ void RaftCore::become_follower(uint64_t term, NodeId leader) {
     mark_hard_dirty();
   }
   role_ = Role::kFollower;
+  campaign_ = Campaign::kNone;
   leader_ = leader;
   heartbeat_elapsed_ = 0;
   fail_pending_reads();
   reset_election_timer();
 }
 
+// PreVote: a hypothetical election that does NOT bump currentTerm or votedFor.
+// A node partitioned away from the cluster keeps failing PreVote (no quorum),
+// so its term never runs ahead, so it cannot disrupt a healthy leader when it
+// rejoins (Raft §4.2.3 / §9.6, the "disruptive server" problem).
+void RaftCore::start_prevote() {
+  campaign_ = Campaign::kPre;
+  role_ = Role::kFollower;  // not a real candidate yet
+  leader_ = 0;
+  reset_election_timer();
+  std::fill(votes_granted_.begin(), votes_granted_.end(), false);
+  std::fill(votes_responded_.begin(), votes_responded_.end(), false);
+  votes_granted_[peer_slot(cfg_.id)] = true;
+  votes_responded_[peer_slot(cfg_.id)] = true;
+
+  if (cfg_.quorum() <= 1) {  // single-node: skip straight to a real election
+    become_candidate();
+    return;
+  }
+  broadcast_vote_request(MsgType::kPreVote, hard_.current_term + 1);
+}
+
 void RaftCore::become_candidate() {
   role_ = Role::kCandidate;
+  campaign_ = Campaign::kReal;
   hard_.current_term += 1;
   hard_.voted_for = cfg_.id;  // vote for self
   mark_hard_dirty();
@@ -124,7 +151,7 @@ void RaftCore::become_candidate() {
     become_leader();
     return;
   }
-  broadcast_request_vote();
+  broadcast_vote_request(MsgType::kRequestVote, hard_.current_term);
 }
 
 void RaftCore::become_leader() {
@@ -136,12 +163,25 @@ void RaftCore::become_leader() {
     next_index_[i] = li + 1;
     match_index_[i] = 0;
   }
-  match_index_[peer_slot(cfg_.id)] = li;
+  campaign_ = Campaign::kNone;
   pending_reads_.clear();
   LOG_DEBUG("raft", "node %llu -> LEADER term %llu",
             (unsigned long long)cfg_.id, (unsigned long long)hard_.current_term);
-  // Phase 3 will append a no-op here. Phase 2: just start heartbeating.
-  broadcast_append_entries(/*heartbeat=*/true);
+
+  // Append a no-op entry in the new term and replicate it. This is the Raft
+  // §5.4.2 mechanism: a fresh leader cannot commit entries from earlier terms
+  // by replica count alone, but once a current-term entry commits, every
+  // preceding entry commits with it. The no-op gives us that current-term
+  // entry immediately instead of waiting for the first client write.
+  LogEntry noop;
+  noop.term = hard_.current_term;
+  noop.index = last_log_index() + 1;
+  noop.type = EntryType::kNoOp;
+  log_.push_back(noop);
+  match_index_[peer_slot(cfg_.id)] = last_log_index();
+  maybe_advance_commit();  // single-node clusters commit immediately
+
+  broadcast_append_entries(/*heartbeat=*/false);
 }
 
 // ---------------------------------------------------------------------------
@@ -156,7 +196,7 @@ void RaftCore::tick() {
     return;
   }
   if (++election_elapsed_ >= election_timeout_) {
-    become_candidate();
+    start_prevote();
   }
 }
 
@@ -167,7 +207,10 @@ void RaftCore::step(const Message& m) {
   if (!is_voter(m.from) && m.from != 0) return;  // ignore unknown peers
 
   // Rule: any RPC with a higher term -> step down and adopt it first.
-  if (m.term > hard_.current_term) {
+  // EXCEPT PreVote, whose term is hypothetical (currentTerm+1) and must not
+  // move our term. (PreVoteResp carries the responder's real term, so it does
+  // count.)
+  if (m.type != MsgType::kPreVote && m.term > hard_.current_term) {
     NodeId lead = 0;
     if (m.type == MsgType::kAppendEntries || m.type == MsgType::kReadIndex)
       lead = m.from;
@@ -175,6 +218,8 @@ void RaftCore::step(const Message& m) {
   }
 
   switch (m.type) {
+    case MsgType::kPreVote: handle_pre_vote(m); break;
+    case MsgType::kPreVoteResp: handle_pre_vote_resp(m); break;
     case MsgType::kRequestVote: handle_request_vote(m); break;
     case MsgType::kRequestVoteResp: handle_request_vote_resp(m); break;
     case MsgType::kAppendEntries: handle_append_entries(m); break;
@@ -182,6 +227,40 @@ void RaftCore::step(const Message& m) {
     case MsgType::kReadIndex: handle_read_index(m); break;
     case MsgType::kReadIndexResp: handle_read_index_resp(m); break;
   }
+}
+
+void RaftCore::handle_pre_vote(const Message& m) {
+  Message r;
+  r.type = MsgType::kPreVoteResp;
+  r.to = m.from;
+  r.term = hard_.current_term;  // our REAL term
+  r.vote_granted = false;
+
+  const bool up_to_date = log_is_up_to_date(m.last_log_index, m.last_log_term);
+  // Leader stickiness: if we've heard from a leader within the election
+  // timeout, refuse -- the requester is likely a partitioned node rejoining.
+  const bool heard_from_leader =
+      (leader_ != 0 && election_elapsed_ < election_timeout_);
+  if (m.term >= hard_.current_term && up_to_date && !heard_from_leader &&
+      role_ != Role::kLeader) {
+    r.vote_granted = true;
+  }
+  send(std::move(r));
+}
+
+void RaftCore::handle_pre_vote_resp(const Message& m) {
+  if (campaign_ != Campaign::kPre) return;
+  if (m.term > hard_.current_term) {
+    become_follower(m.term, 0);
+    return;
+  }
+  const size_t s = peer_slot(m.from);
+  votes_responded_[s] = true;
+  if (m.vote_granted) votes_granted_[s] = true;
+
+  size_t granted = 0;
+  for (bool g : votes_granted_) granted += g ? 1 : 0;
+  if (granted >= cfg_.quorum()) become_candidate();  // now do the real thing
 }
 
 bool RaftCore::log_is_up_to_date(uint64_t cand_last_index,
@@ -238,6 +317,7 @@ void RaftCore::handle_append_entries(const Message& m) {
   }
   // Valid leader for our term.
   role_ = Role::kFollower;
+  campaign_ = Campaign::kNone;
   leader_ = m.from;
   reset_election_timer();
 
@@ -276,13 +356,17 @@ void RaftCore::handle_append_entries(const Message& m) {
     log_.push_back(m.entries[ei]);
   }
 
+  // §5.3: commitIndex = min(leaderCommit, index of the last *new* entry).
+  // Using last_log_index() instead would let a follower mark its own leftover
+  // uncommitted tail as committed, which a later leader may still truncate.
+  const uint64_t last_new = m.prev_log_index + m.entries.size();
   if (m.leader_commit > hard_.commit_index) {
-    hard_.commit_index = std::min(m.leader_commit, last_log_index());
+    hard_.commit_index = std::min(m.leader_commit, last_new);
     mark_hard_dirty();
   }
 
   r.success = true;
-  r.match_index = m.prev_log_index + m.entries.size();
+  r.match_index = last_new;
   send(std::move(r));
 }
 
@@ -323,17 +407,21 @@ void RaftCore::handle_append_entries_resp(const Message& m) {
 // ---------------------------------------------------------------------------
 // leader replication senders
 // ---------------------------------------------------------------------------
-void RaftCore::broadcast_request_vote() {
+void RaftCore::broadcast_vote_request(MsgType type, uint64_t term) {
   for (NodeId p : cfg_.peers) {
     if (p == cfg_.id) continue;
     Message m;
-    m.type = MsgType::kRequestVote;
+    m.type = type;
     m.to = p;
-    m.term = hard_.current_term;
+    m.term = term;
     m.last_log_index = last_log_index();
     m.last_log_term = last_log_term();
     send(std::move(m));
   }
+}
+
+void RaftCore::broadcast_request_vote() {
+  broadcast_vote_request(MsgType::kRequestVote, hard_.current_term);
 }
 
 void RaftCore::broadcast_append_entries(bool heartbeat) {
@@ -432,6 +520,7 @@ bool RaftCore::propose(EntryType type, std::string data) {
   e.data = std::move(data);
   log_.push_back(std::move(e));
   match_index_[peer_slot(cfg_.id)] = last_log_index();
+  maybe_advance_commit();  // single-node clusters commit immediately
   broadcast_append_entries(/*heartbeat=*/false);
   return true;
 }
