@@ -37,6 +37,7 @@ std::string encode_message(const Message& m) {
   b.u64(m.conflict_index);
   b.u64(m.match_index);
   b.u64(m.read_ctx);
+  b.u64(m.hb_round);
   b.u32(static_cast<uint32_t>(m.entries.size()));
   for (const auto& e : m.entries) put_entry(b, e);
   return b.take();
@@ -60,6 +61,7 @@ Message decode_message(std::string_view payload) {
   m.conflict_index = r.u64();
   m.match_index = r.u64();
   m.read_ctx = r.u64();
+  m.hb_round = r.u64();
   uint32_t n = r.u32();
   m.entries.reserve(n);
   for (uint32_t i = 0; i < n; ++i) m.entries.push_back(get_entry(r));

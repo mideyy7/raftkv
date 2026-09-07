@@ -107,7 +107,13 @@ class RaftCore {
   std::vector<uint64_t> match_index_;
 
   // ReadIndex bookkeeping (Phase 4)
-  struct PendingRead { uint64_t ctx; uint64_t index; std::vector<bool> acks; };
+  uint64_t hb_round_ = 0;  // leader: bumped on every AppendEntries broadcast
+  struct PendingRead {
+    uint64_t ctx;
+    uint64_t index;
+    uint64_t round;  // acks with hb_round >= this confirm current leadership
+    std::vector<bool> acks;
+  };
   std::vector<PendingRead> pending_reads_;
 
   // Ready accumulators

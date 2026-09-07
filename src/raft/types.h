@@ -57,6 +57,10 @@ struct Message {
 
   // --- ReadIndex / ReadIndexResp (phase 4) ---
   uint64_t read_ctx = 0;
+  // heartbeat round tag: leader stamps every AppendEntries, follower echoes it
+  // in the response so ReadIndex can confirm a quorum acked a round that began
+  // at/after the read request (prevents a partitioned ex-leader serving reads).
+  uint64_t hb_round = 0;
 };
 
 // What the driver must do after a step()/tick(), in this order:

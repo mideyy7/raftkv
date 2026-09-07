@@ -47,8 +47,13 @@ start_cluster() {  # start_cluster N [extra node args...]
 
 stop_cluster() {
   local pid
-  for pid in "${NODE_PIDS[@]:-}"; do kill "$pid" 2>/dev/null; done
+  # SIGKILL (not TERM): guarantee the port is released before the next cluster,
+  # otherwise a lingering node from the previous run keeps answering on a reused
+  # port with a stale log and corrupts the fresh cluster.
+  for pid in "${NODE_PIDS[@]:-}"; do kill -9 "$pid" 2>/dev/null; done
   for pid in "${NODE_PIDS[@]:-}"; do wait "$pid" 2>/dev/null; done
+  [[ -n "${WORKDIR:-}" ]] && pkill -9 -f "raftkv-node .*$WORKDIR" 2>/dev/null
+  sleep 0.3
   [[ -n "${WORKDIR:-}" ]] && rm -rf "$WORKDIR"
 }
 

@@ -20,6 +20,8 @@ hit() { local id="$1"; shift; printf '%s\nQUIT\n' "$*" | nc -w 1 127.0.0.1 "$(cl
 
 overall=0
 for cyc in $(seq 1 "$CYCLES"); do
+  # distinct port range per cycle so a stray process can never collide
+  export RAFT_BASE_PORT=$(( 7001 + cyc * 40 ))
   start_cluster "$N"
   sleep 0.5
   L=$(wait_for_leader "$N" 20) || { echo "cycle $cyc: no leader"; overall=1; stop_cluster; continue; }

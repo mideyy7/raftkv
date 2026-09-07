@@ -310,6 +310,7 @@ void RaftCore::handle_append_entries(const Message& m) {
   r.to = m.from;
   r.term = hard_.current_term;
   r.success = false;
+  r.hb_round = m.hb_round;  // echo the round tag for ReadIndex confirmation
 
   if (m.term < hard_.current_term) {  // stale leader
     send(std::move(r));
@@ -378,9 +379,10 @@ void RaftCore::handle_append_entries_resp(const Message& m) {
     match_index_[s] = std::max(match_index_[s], m.match_index);
     next_index_[s] = match_index_[s] + 1;
     maybe_advance_commit();
-    // ReadIndex acks piggyback on any successful AppendEntries round.
+    // ReadIndex: only count this ack for reads whose round started at/before
+    // the round this response echoes -- proves current leadership.
     for (auto& pr : pending_reads_) {
-      if (s < pr.acks.size()) pr.acks[s] = true;
+      if (s < pr.acks.size() && m.hb_round >= pr.round) pr.acks[s] = true;
     }
     handle_read_index_resp(m);  // re-check pending reads for quorum
     return;
@@ -425,6 +427,7 @@ void RaftCore::broadcast_request_vote() {
 }
 
 void RaftCore::broadcast_append_entries(bool heartbeat) {
+  ++hb_round_;  // one round tag shared by every peer in this broadcast
   for (NodeId p : cfg_.peers) {
     if (p == cfg_.id) continue;
     send_append_to(p, heartbeat);
@@ -445,6 +448,7 @@ void RaftCore::send_append_to(NodeId peer, bool heartbeat) {
   m.prev_log_index = prev_index;
   m.prev_log_term = prev_term;
   m.leader_commit = hard_.commit_index;
+  m.hb_round = hb_round_;
   if (!heartbeat || ni <= last_log_index()) {
     for (uint64_t i = ni; i <= last_log_index(); ++i) {
       const uint64_t first = log_.front().index;
@@ -481,11 +485,13 @@ void RaftCore::request_read(uint64_t ctx) {
   PendingRead pr;
   pr.ctx = ctx;
   pr.index = hard_.commit_index;
+  pr.round = hb_round_ + 1;  // the round the broadcast below will carry
   pr.acks.assign(cfg_.peers.size(), false);
   pr.acks[peer_slot(cfg_.id)] = true;
   pending_reads_.push_back(std::move(pr));
-  // Nudge a heartbeat round so acks come back promptly.
+  // Fresh heartbeat round; a quorum echoing it confirms we are still leader.
   broadcast_append_entries(/*heartbeat=*/true);
+  if (cfg_.quorum() <= 1) handle_read_index_resp(Message{});  // single node
 }
 
 void RaftCore::handle_read_index(const Message& m) {
